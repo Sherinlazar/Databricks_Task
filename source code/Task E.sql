@@ -1,50 +1,81 @@
 -- Implement Data Quality Check Null data, data type mismatch, patterns, outliers 
-create or replace live table decisionminds.dlt.silver_order as
-select
-  try_cast(regexp_replace(order_id, '[^0-9]', '') as bigint) as order_id,
-  try_cast(regexp_extract(customer_id, '^([0-9]+)', 1) as bigint) as customer_id,
-  to_date(order_date) as order_date,
-  try_cast(regexp_replace(amount, '[^0-9.]', '') as decimal(10,2)) as amount
-from decisionminds.dlt.bronze_orders
-where
-  try_cast(regexp_replace(order_id, '[^0-9]', '') as bigint) is not null
-  and regexp_extract(customer_id, '^([0-9]+)', 1) <> ''
-  and try_cast(regexp_extract(customer_id, '^([0-9]+)', 1) as bigint) is not null
-  and regexp_replace(amount, '[^0-9.]', '') <> ''
-  and try_cast(regexp_replace(amount, '[^0-9.]', '') as decimal(10,2)) is not null
-  and try_cast(regexp_replace(amount, '[^0-9.]', '') as decimal(10,2)) >= 0;
+CREATE OR REPLACE LIVE TABLE decisionminds.dlt.silver_order
+COMMENT "Cleaned silver orders with strict data quality checks"
+TBLPROPERTIES ("quality" = "silver")
+AS
+SELECT
+  CAST(regexp_replace(order_id, '[^0-9]', '') AS BIGINT)        AS order_id,
+  CAST(regexp_extract(customer_id, '^([0-9]+)', 1) AS BIGINT)  AS customer_id,
+  CAST(order_date AS DATE)                                     AS order_date,
+  CAST(regexp_replace(amount, '[^0-9.]', '') AS DECIMAL(10,2)) AS amount
+FROM decisionminds.dlt.bronze_orders
+WHERE
+  -- NULL & TYPE CHECKS
+  order_id IS NOT NULL
+  AND customer_id IS NOT NULL
+  AND order_date IS NOT NULL
+  AND amount IS NOT NULL
+
+  -- PATTERN VALIDATION
+  AND regexp_replace(order_id, '[^0-9]', '') RLIKE '^[0-9]+$'
+  AND regexp_extract(customer_id, '^([0-9]+)', 1) <> ''
+
+  -- BUSINESS RULES
+  AND CAST(regexp_replace(amount, '[^0-9.]', '') AS DECIMAL(10,2)) >= 0
+
+  -- OUTLIER CONTROL (BUSINESS THRESHOLD)
+  AND CAST(regexp_replace(amount, '[^0-9.]', '') AS DECIMAL(10,2)) <= 100000;
 
 
 
 
 
-create or replace live table decisionminds.dlt.silver_customer as
-select
-  try_cast(trim(regexp_replace(customer_id, '[^0-9]', '')) as bigint) as customer_id,
-  trim(regexp_replace(first_name, '[^a-zA-Z]', '')) as first_name,
-  trim(regexp_replace(last_name, '[^a-zA-Z]', '')) as last_name,
-  trim(regexp_replace(email, '[^a-zA-Z0-9@._-]', '')) as email,
-  try_cast(trim(regexp_replace(phone, '[^0-9]', '')) as bigint) as phone,
+CREATE OR REPLACE LIVE TABLE decisionminds.dlt.silver_customer
+COMMENT "Cleaned silver customers with strict data quality checks"
+TBLPROPERTIES ("quality" = "silver")
+AS
+SELECT
+  CAST(regexp_replace(customer_id, '[^0-9]', '') AS BIGINT) AS customer_id,
+
+  initcap(trim(regexp_replace(first_name, '[^a-zA-Z]', ''))) AS first_name,
+  initcap(trim(regexp_replace(last_name, '[^a-zA-Z]', '')))  AS last_name,
+
+  lower(trim(email)) AS email,
+
+  CAST(regexp_replace(phone, '[^0-9]', '') AS BIGINT) AS phone,
+
   CASE
-    WHEN LOWER(TRIM(gender)) IN ('m', 'male') THEN 'Male'
-    WHEN LOWER(TRIM(gender)) IN ('f', 'female') THEN 'Female'
+    WHEN lower(trim(gender)) IN ('m','male') THEN 'Male'
+    WHEN lower(trim(gender)) IN ('f','female') THEN 'Female'
     ELSE NULL
   END AS gender,
-  initcap(trim(regexp_replace(city, '[^a-zA-Z ]', ''))) as city,
-  initcap(trim(regexp_replace(state, '[^a-zA-Z ]', ''))) as state,
-  try_cast(trim(regexp_replace(pincode, '[^0-9]', '')) as bigint) as pincode,
-  try_cast(trim(regexp_replace(join_date, '[^0-9-]', '')) as date) as join_date,
-  initcap(trim(regexp_replace(customer_status, '[^a-zA-Z]', ''))) as customer_status
-from decisionminds.dlt.bronze_customers
-where 
-  try_cast(trim(regexp_replace(customer_id, '[^0-9]', '')) as bigint) is not null 
-  and trim(regexp_replace(first_name, '[^a-zA-Z]', '')) <> ''
-  and trim(regexp_replace(last_name, '[^a-zA-Z]', '')) <> ''
-  and trim(regexp_replace(email, '[^a-zA-Z0-9@._-]', '')) <> ''
-  and try_cast(trim(regexp_replace(phone, '[^0-9]', '')) as bigint) is not null
-  and trim(regexp_replace(gender, '[^a-zA-Z]', '')) <> ''
-  and trim(regexp_replace(city, '[^a-zA-Z ]', '')) <> ''
-  and trim(regexp_replace(state, '[^a-zA-Z ]', '')) <> ''
-  and try_cast(trim(regexp_replace(pincode, '[^0-9]', '')) as bigint) is not null
-  and try_cast(trim(regexp_replace(join_date, '[^0-9-]', '')) as date) is not null
-  and trim(regexp_replace(customer_status, '[^a-zA-Z]', '')) <> ''
+
+  initcap(trim(regexp_replace(city, '[^a-zA-Z ]', '')))  AS city,
+  initcap(trim(regexp_replace(state, '[^a-zA-Z ]', ''))) AS state,
+
+  CAST(regexp_replace(pincode, '[^0-9]', '') AS BIGINT) AS pincode,
+  CAST(join_date AS DATE) AS join_date,
+
+  initcap(trim(regexp_replace(customer_status, '[^a-zA-Z]', ''))) AS customer_status
+FROM decisionminds.dlt.bronze_customers
+WHERE
+  -- NULL & TYPE CHECKS
+  customer_id IS NOT NULL
+  AND first_name IS NOT NULL
+  AND last_name IS NOT NULL
+  AND email IS NOT NULL
+  AND phone IS NOT NULL
+  AND gender IS NOT NULL
+  AND city IS NOT NULL
+  AND state IS NOT NULL
+  AND pincode IS NOT NULL
+  AND join_date IS NOT NULL
+  AND customer_status IS NOT NULL
+
+  -- PATTERN VALIDATION
+  AND email RLIKE '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$'
+  AND length(regexp_replace(phone, '[^0-9]', '')) = 10
+  AND length(regexp_replace(pincode, '[^0-9]', '')) = 6
+
+  -- DATE RANGE CHECK
+  AND join_date <= current_date();
